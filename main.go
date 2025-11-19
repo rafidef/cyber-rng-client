@@ -34,28 +34,18 @@ var (
 	bold    = color.New(color.Bold).SprintFunc()
 )
 
-// --- STRUCTS ---
 type RigStats struct { GPU string `json:"gpu"`; VPN string `json:"vpn"` }
 type PlayerStats struct { Cooldown int `json:"cooldown"`; Luck int `json:"luck"`; BuffTime int `json:"buffTime"` }
 type ProfileResponse struct { Address string `json:"address"`; Balance string `json:"balance"`; Stats PlayerStats `json:"stats"`; Rig RigStats `json:"rig"` }
 type InventoryItem struct { ID int `json:"id"`; Name string `json:"name"`; Type string `json:"type"`; Qty int `json:"qty"` }
 type MineResult struct { Name string `json:"name"`; Type string `json:"type"`; Stats string `json:"stats"`; IsEquipment bool `json:"isEquipment"` }
-
-// FIXED: Added CooldownRemaining field back
-type MineResponse struct { 
-	Success           bool        `json:"success"` 
-	Data              *MineResult `json:"data"` 
-	Error             string      `json:"error"`
-	CooldownRemaining int         `json:"cooldownRemaining"` 
-}
-
+type MineResponse struct { Success bool `json:"success"`; Data *MineResult `json:"data"`; Error string `json:"error"`; CooldownRemaining int `json:"cooldownRemaining"` }
 type Mission struct { ID int `json:"id"`; Desc string `json:"desc"`; Progress int `json:"progress"`; Target int `json:"target"`; Reward string `json:"reward"`; Claimed bool `json:"claimed"` }
 type ContractsRes struct { Date string `json:"date"`; Missions []Mission `json:"missions"` }
 type LeaderboardRes struct { Top10 []struct { Address string `json:"address"`; Balance string `json:"balance"` } `json:"top10"` }
 type StakeInfo struct { ID int `json:"id"`; Name string `json:"name"`; Yield string `json:"yieldRate"`; Staked int `json:"staked"`; Pending string `json:"pending"` }
 type StakeRes struct { Stakes []StakeInfo `json:"stakes"` }
 
-// --- MAIN ---
 func main() {
 	pk, addr := loadWallet()
 	for {
@@ -70,7 +60,8 @@ func main() {
 		fmt.Println("4. " + bold("INVENTORY") + "    (Salvage / Use)")
 		fmt.Println("5. " + bold("SHADOW_NET") + "   (Missions & Leaderboard)")
 		fmt.Println("6. " + bold("SERVER_ROOM") + "  (Passive Income)")
-		fmt.Println("7. " + bold("EXIT"))
+		fmt.Println("7. " + bold("BLACK_MARKET") + " (Buy Boosts & Tools)")
+		fmt.Println("8. " + bold("EXIT"))
 		fmt.Print("\nrunner@terminal:~$ ")
 
 		var choice string; fmt.Scanln(&choice)
@@ -81,26 +72,19 @@ func main() {
 		case "4": manageInventory(pk, addr)
 		case "5": shadowNet(pk, addr)
 		case "6": serverRoom(pk, addr)
-		case "7": os.Exit(0)
+		case "7": openShop(pk, addr)
+		case "8": os.Exit(0)
 		}
-		// waitForKey handled inside functions now if needed
 	}
 }
 
-// --- HELPER: Fetch Profile Data ---
-func fetchProfile(addr string) (*ProfileResponse, error) {
+func printHUD(addr string) {
 	client := &http.Client{Timeout: 2 * time.Second}
 	resp, err := client.Get(SERVER_URL + "/profile/" + addr)
-	if err != nil { return nil, err }
+	if err != nil { fmt.Println(red("OFFLINE - CANNOT CONNECT")); return }
 	defer resp.Body.Close()
 	var p ProfileResponse
 	json.NewDecoder(resp.Body).Decode(&p)
-	return &p, nil
-}
-
-func printHUD(addr string) {
-	p, err := fetchProfile(addr)
-	if err != nil { fmt.Println(red("OFFLINE - CANNOT CONNECT")); return }
 
 	fmt.Println(cyan("=================================================="))
 	fmt.Printf(" OPERATOR : %s\n", green(addr))
@@ -112,21 +96,17 @@ func printHUD(addr string) {
 	fmt.Println(bold("\n [ STATS ]"))
 	fmt.Printf(" LUCK : %d\n", p.Stats.Luck)
 	fmt.Printf(" CD   : %ds\n", p.Stats.Cooldown)
-	if p.Stats.BuffTime > 0 { fmt.Printf(" BUFF : %s (%dm)\n", green("ACTIVE"), p.Stats.BuffTime/60) }
+	if p.Stats.BuffTime > 0 { 
+		mins := p.Stats.BuffTime / 60
+		fmt.Printf(" BOOST : %s (%dm left)\n", green("ACTIVE"), mins) 
+	}
 	fmt.Println(cyan("=================================================="))
 }
 
-// --- ACTIONS ---
-
 func performHack(pk *ecdsa.PrivateKey, addr string) {
 	fmt.Println(yellow("\n>> HACKING NODE..."))
-	
-	// Fast Loading Animation
 	fmt.Print("[")
-	for i := 0; i < 15; i++ {
-		fmt.Print(green("="))
-		time.Sleep(20 * time.Millisecond)
-	}
+	for i := 0; i < 15; i++ { fmt.Print(green("=")); time.Sleep(20 * time.Millisecond) }
 	fmt.Println("]")
 
 	sig := sign(pk, "MINT_ACTION")
@@ -137,7 +117,6 @@ func performHack(pk *ecdsa.PrivateKey, addr string) {
 	if m.Success {
 		d := m.Data
 		fmt.Println(green("\n>> SUCCESS: ACCESS GRANTED <<"))
-		
 		if d.IsEquipment {
 			fmt.Println(magenta(">>> CRITICAL: NEW HARDWARE FOUND! <<<"))
 			fmt.Printf("[%s] %s (%s)\n", d.Type, bold(d.Name), d.Stats)
@@ -148,34 +127,53 @@ func performHack(pk *ecdsa.PrivateKey, addr string) {
 			fmt.Printf("DATA: %s (%s)\n", white(d.Name), d.Stats)
 		}
 
-		// Visual Countdown
-		prof, _ := fetchProfile(addr) 
-		cooldown := 30 
-		if prof != nil { cooldown = prof.Stats.Cooldown }
-
-		fmt.Println("")
-		fmt.Println(yellow("System Cooling Down..."))
+		// Countdown
+		client := &http.Client{Timeout: 2 * time.Second}
+		resp, _ := client.Get(SERVER_URL + "/profile/" + addr)
+		var p ProfileResponse
+		json.NewDecoder(resp.Body).Decode(&p)
 		
-		for i := cooldown; i > 0; i-- {
-			fmt.Printf("\rrecharge_cycle: [%-30s] %ds ", getBar(i, cooldown), i)
+		fmt.Println(yellow("\nSystem Cooling Down..."))
+		for i := p.Stats.Cooldown; i > 0; i-- {
+			fmt.Printf("\rrecharge_cycle: [%-30s] %ds ", getBar(i, p.Stats.Cooldown), i)
 			time.Sleep(1 * time.Second)
 		}
-		fmt.Printf("\rrecharge_cycle: [%-30s] READY\n", getBar(0, cooldown))
+		fmt.Printf("\rrecharge_cycle: [%-30s] READY\n", getBar(0, p.Stats.Cooldown))
 		time.Sleep(500 * time.Millisecond)
 
 	} else {
-		// Error Handling
 		if m.CooldownRemaining > 0 {
 			fmt.Printf("\n%s %d seconds remaining.\n", red(">> SYSTEM OVERHEAT! <<"), m.CooldownRemaining)
-			waitForKey()
 		} else if m.Error == "System Overheat" {
 			fmt.Println(red("\n>> SYSTEM OVERHEAT! <<"))
-			waitForKey()
 		} else {
 			fmt.Println(red("\n>> FAILED: "), m.Error)
-			waitForKey()
 		}
+		waitForKey()
 	}
+}
+
+func openShop(pk *ecdsa.PrivateKey, addr string) {
+	fmt.Println(bold("\n=== BLACK MARKET ==="))
+	fmt.Println("\nID  | NAME             | EFFECT              | DURATION | COST")
+	fmt.Println("-----------------------------------------------------------------")
+	fmt.Printf("301 | %-16s | %-19s | %-8s | %s\n", "Script Kiddie", "Luck +1000", "1h", yellow("100 $HASH"))
+	fmt.Printf("302 | %-16s | %-19s | %-8s | %s\n", "Black Hat Tool", "Luck +5000", "1h", yellow("500 $HASH"))
+	fmt.Printf("303 | %-16s | %-19s | %-8s | %s\n", "State Sponsored", "Luck +20000", "1h", yellow("2000 $HASH"))
+	fmt.Println("- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -")
+	fmt.Printf("501 | %-16s | %-19s | %-8s | %s\n", "Thermal Paste", "Reset Cooldown", "1x", yellow("150 $HASH"))
+	fmt.Printf("502 | %-16s | %-19s | %-8s | %s\n", "Loot Crate", "Random Reward", "1x", yellow("500 $HASH"))
+	fmt.Println("-----------------------------------------------------------------")
+	
+	fmt.Print("\nEnter ID to BUY (0 back): ")
+	var idStr string; fmt.Scanln(&idStr)
+	if idStr == "0" { return }
+
+	fmt.Println("Transferring funds...")
+	sig := sign(pk, "BUY_ACTION")
+	res := postRequest("/shop/buy", map[string]string{"userAddress": addr, "signature": sig, "itemId": idStr})
+	printRes(res)
+	waitForKey()
 }
 
 func getBar(current, total int) string {
@@ -191,7 +189,7 @@ func getBar(current, total int) string {
 }
 
 func serverRoom(pk *ecdsa.PrivateKey, addr string) {
-	fmt.Println(bold("\n=== SERVER ROOM (PASSIVE INCOME) ==="))
+	fmt.Println(bold("\n=== SERVER ROOM ==="))
 	resp, _ := http.Get(SERVER_URL + "/rig/status/" + addr)
 	var r StakeRes
 	json.NewDecoder(resp.Body).Decode(&r)
@@ -240,7 +238,17 @@ func shadowNet(pk *ecdsa.PrivateKey, addr string) {
 		resp, _ := http.Get(SERVER_URL + "/contracts/" + addr)
 		var r ContractsRes
 		json.NewDecoder(resp.Body).Decode(&r)
+
 		fmt.Println(bold("\n=== DAILY CONTRACTS ==="))
+		
+		now := time.Now().UTC()
+		nextMidnight := time.Date(now.Year(), now.Month(), now.Day()+1, 0, 0, 0, 0, time.UTC)
+		timeLeft := nextMidnight.Sub(now)
+		h := int(timeLeft.Hours())
+		m := int(timeLeft.Minutes()) % 60
+		s := int(timeLeft.Seconds()) % 60
+		fmt.Printf("REFRESH IN: %s\n\n", color.HiYellowString(fmt.Sprintf("%02dh %02dm %02ds", h, m, s)))
+
 		for _, m := range r.Missions {
 			st := red("[INCOMPLETE]")
 			if m.Claimed { st = green("[CLAIMED]") } else if m.Progress >= m.Target { st = yellow("[READY]") }
@@ -267,21 +275,27 @@ func shadowNet(pk *ecdsa.PrivateKey, addr string) {
 func openWorkshop(pk *ecdsa.PrivateKey, addr string) {
 	fmt.Println(magenta("\n=== WORKSHOP ==="))
 	resp, _ := http.Get(SERVER_URL + "/inventory/" + addr)
+	defer resp.Body.Close() 
 	type InvRes struct { Items []InventoryItem `json:"items"` }
 	var inv InvRes
 	json.NewDecoder(resp.Body).Decode(&inv)
-	fmt.Println("\n[INVENTORY]")
-	for _, it := range inv.Items { if it.Type != "ARTIFACT" { fmt.Printf("[%d] %s x%d\n", it.ID, white(it.Name), it.Type, it.Qty) } }
+	fmt.Println("\n[INVENTORY - HARDWARE & MATERIALS]")
+	found := false
+	for _, it := range inv.Items {
+		if it.ID >= 100 {
+			fmt.Printf("[%d] %s (%s) x%d\n", it.ID, white(it.Name), it.Type, it.Qty)
+			found = true
+		}
+	}
+	if !found { fmt.Println(yellow("No upgradeable hardware found.")) }
 
 	fmt.Print("\nTarget ID (0 back): "); var tId string; fmt.Scanln(&tId)
-	if tId=="0" { return }
+	if tId == "0" { return }
 	
 	fmt.Print("Material ID: "); var mId string; fmt.Scanln(&mId)
 	sig := sign(pk, "ENCHANT_ACTION")
 	res := postRequest("/workshop/enchant", map[string]string{"userAddress": addr, "signature": sig, "targetId": tId, "materialId": mId})
-	var r struct { Success bool; Message string; Level int }
-	json.Unmarshal(res, &r)
-	if r.Success { fmt.Println(green("SUCCESS!"), r.Message) } else { fmt.Println(red("FAIL:"), r.Message) }
+	printRes(res)
 	waitForKey()
 }
 
@@ -296,10 +310,14 @@ func manageRig(pk *ecdsa.PrivateKey, addr string) {
 
 func manageInventory(pk *ecdsa.PrivateKey, addr string) {
 	resp, _ := http.Get(SERVER_URL + "/inventory/" + addr)
+	defer resp.Body.Close()
 	type InvRes struct { Items []InventoryItem `json:"items"` }
 	var inv InvRes
 	json.NewDecoder(resp.Body).Decode(&inv)
-	for _, it := range inv.Items { fmt.Printf("[%d] %s (%s) x%d\n", it.ID, it.Name, it.Type, it.Qty) }
+	
+	for _, it := range inv.Items { 
+		fmt.Printf("[%d] %s (%s) x%d\n", it.ID, it.Name, it.Type, it.Qty) 
+	}
 
 	fmt.Println("\n[S] Salvage  [U] Use Item  [0] Back")
 	var c string; fmt.Scanln(&c)
@@ -345,4 +363,4 @@ func printRes(b []byte) {
 }
 func waitForKey() { fmt.Print(color.HiBlackString("\n[ENTER]")); var s string; fmt.Scanln(&s) }
 func clearScreen() { c:=exec.Command("clear"); if runtime.GOOS=="windows"{c=exec.Command("cmd","/c","cls")}; c.Stdout=os.Stdout; c.Run() }
-func printBanner() { fmt.Println(cyan(` :: RNG MINER v7.1 :: FINAL CLI :: `)) }
+func printBanner() { fmt.Println(cyan(` :: RNG MINER v7.5 :: FINAL CLI :: `)) }
