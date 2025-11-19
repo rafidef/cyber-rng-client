@@ -11,8 +11,6 @@
 
 <div align="center">
 
-<img src="https://capsule-render.vercel.app/api?type=waving&color=00ff00&height=180&section=header&text=CYBER%20UPLINK&fontSize=60&fontAlignY=40&fontColor=0f0f0f&animation=fadeIn&desc=Terminal%20Client%20Interface&descAlignY=60&descAlign=50" />
-
 ### The Interface to the Shadow Network.
 
 <p>
